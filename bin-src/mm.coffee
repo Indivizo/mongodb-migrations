@@ -38,8 +38,11 @@ readConfig = (fileName) ->
   catch e
     exit fileName + " cannot be imported", e
 
-cwd = ->
-  path.join dir, config.directory
+cwd = (cwdPath) ->
+  if (config.directory.match /^\/.*/) and (fs.existsSync config.directory)
+    config.directory
+  else
+    path.join dir, config.directory
 
 createMigrator = ->
   new Migrator config

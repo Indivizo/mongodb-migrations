@@ -56,8 +56,12 @@
     }
   };
 
-  cwd = function() {
-    return path.join(dir, config.directory);
+  cwd = function(cwdPath) {
+    if ((config.directory.match(/^\/.*/)) && (fs.existsSync(config.directory))) {
+      return config.directory;
+    } else {
+      return path.join(dir, config.directory);
+    }
   };
 
   createMigrator = function() {
