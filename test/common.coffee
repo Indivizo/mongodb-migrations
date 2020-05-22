@@ -6,6 +6,7 @@ config =
   port: 27017
   db: '_mm'
   collection: '_migrations'
+  timeout: 200
 
 module.exports =
   config: config
@@ -17,4 +18,4 @@ module.exports =
         throw err
       db.collection(config.collection).remove {}, ->
         migrator = new mm.Migrator config, null
-        done { migrator, db }
+        done { migrator, db, config }

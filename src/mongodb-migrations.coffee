@@ -3,9 +3,9 @@ path = require 'path'
 Promise = require 'bluebird'
 _ = require 'lodash'
 mkdirp = require 'mkdirp'
-mongoConnect = require('./utils').connect
-repeatString = require('./utils').repeatString
+{ repeatString, connect: mongoConnect, normalizeConfig } = require('./utils')
 migrationStub = require('./migration-stub')
+
 
 defaultLog = (src, args...) ->
   pad = repeatString(' ', if src is 'system' then 4 else 2)
@@ -13,6 +13,9 @@ defaultLog = (src, args...) ->
 
 class Migrator
   constructor: (dbConfig, logFn) ->
+    # this will throw in case of invalid values
+    dbConfig = normalizeConfig(dbConfig)
+
     @_isDisposed = false
     @_m = []
     @_result = {}
@@ -23,6 +26,7 @@ class Migrator
       @_db = db
 
     @_collName = dbConfig.collection
+    @_timeout = dbConfig.timeout
 
     if logFn or logFn is null
       @log = logFn
@@ -74,15 +78,25 @@ class Migrator
     userLog = log('user')
     systemLog = log('system')
 
-    insertPromises = []
-
-    allDone = (err) =>
-      Promise.all(insertPromises).then =>
-        done err, @_result
-
     i = 0
     l = m.length
     migrationsCollection = @_coll()
+
+    migrationsCollectionUpdatePromises = []
+
+    handleMigrationDone = (id) ->
+      p = if direction == 'up'
+        Promise.fromCallback (cb) ->
+          migrationsCollection.insert { id }, cb
+      else
+        Promise.fromCallback (cb) ->
+          migrationsCollection.deleteMany { id }, cb
+
+      migrationsCollectionUpdatePromises.push(p)
+
+    allDone = (err) =>
+      Promise.all(migrationsCollectionUpdatePromises).then =>
+        done err, @_result
 
     runOne = =>
       if i >= l
@@ -95,32 +109,46 @@ class Migrator
         _.defer ->
           progress?(migration.id, res)
         msg = "Migration '#{migration.id}': #{res.status}"
-        if res.status == 'skip'
+        if res.status is 'skip'
           msg += " (#{res.reason})"
         systemLog msg
-        if res.status == 'error'
+        if res.status is 'error'
           systemLog '  ' + res.error
-        if res.status == 'ok'
-          insertPromises.push Promise.fromCallback (cb) ->
-            { id } = migration
-            migrationsCollection.insert { id }, cb
+        if res.status is 'ok' or (res.status is 'skip' and res.code in ['no_up', 'no_down'])
+          handleMigrationDone(migration.id)
 
       fn = migration[direction]
       id = migration.id
 
       skipReason = null
+      skipCode = null
       if not fn
         skipReason = "no migration function for direction #{direction}"
+        skipCode = "no_#{direction}"
       if direction == 'up' and id of @_ranMigrations
         skipReason = "migration already ran"
+        skipCode = 'already_ran'
       if direction == 'down' and id not of @_result
         skipReason = "migration wasn't in the recent `migrate` run"
+        skipCode = 'not_in_recent_migrate'
       if skipReason
-        migrationDone status: 'skip', reason: skipReason
+        migrationDone status: 'skip', reason: skipReason, code: skipCode
         return runOne()
+
+      isCallbackCalled = false
+      if @_timeout
+        timeoutId = setTimeout () ->
+          isCallbackCalled = true
+          err = new Error "migration timed-out"
+          migrationDone status: 'error', error: err
+          allDone(err)
+        , @_timeout
 
       context = { db: @_db, log: userLog }
       fn.call context, (err) ->
+        return if isCallbackCalled
+        clearTimeout timeoutId
+
         if err
           migrationDone status: 'error', error: err
           allDone(err)
@@ -132,11 +160,13 @@ class Migrator
 
   migrate: (done, progress) ->
     @_runWhenReady 'up', done, progress
+    return
 
   rollback: (done, progress) ->
     if @_lastDirection != 'up'
       return done new Error('Rollback can only be ran after migrate')
     @_runWhenReady 'down', done, progress
+    return
 
   _loadMigrationFiles: (dir, cb) ->
     mkdirp dir, 0o0774, (err) ->
@@ -146,6 +176,8 @@ class Migrator
         if err
           return cb err
         files = files
+          .filter (f) ->
+            path.extname(f) in ['.js', '.coffee'] and not f.startsWith('.')
           .map (f) ->
             n = f.match(/^(\d+)/)?[1]
             if n

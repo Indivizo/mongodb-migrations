@@ -2,7 +2,7 @@ path = require 'path'
 mm = require '../src/mongodb-migrations'
 testsCommon = require './common'
 
-describe 'Migrator from Directory', ->
+describe 'Migrator Rollback', ->
   migrator = null
   db = null
   coll = null
@@ -14,25 +14,22 @@ describe 'Migrator from Directory', ->
       coll.remove {}, ->
         done()
 
-  it 'should run migrations from directory', (done) ->
+  it 'should cleanup the migrations collection properly', (done) ->
     dir = path.join __dirname, 'migrations'
+    migrationsCol = db.collection '_migrations'
+
     migrator.runFromDir dir, (err, res) ->
       return done(err) if err
-      coll.find({name: 'tobi'}).count (err, count) ->
+      migrationsCol.find().count (err, count) ->
         return done(err) if err
-        count.should.be.equal 1
-
-        coll.find({name: 'loki'}).count (err, count) ->
+        count.should.be.equal 4
+        migrator.rollback (err, res) ->
           return done(err) if err
-          count.should.be.equal 1
-
-          coll.find({ok: 1}).count (err, count) ->
+          coll.find().count (err, count) ->
             return done(err) if err
-            count.should.be.equal 3
+            count.should.be.equal 0
 
-            migrator.rollback (err, res) ->
+            migrationsCol.find().count (err, count) ->
               return done(err) if err
-              coll.find().count (err, count) ->
-                return done(err) if err
-                count.should.be.equal 0
-                done()
+              count.should.be.equal 0
+              done()

@@ -1,5 +1,39 @@
-## 0.6.x
+## 0.8.4
 
+* Migration files other than `.js` and `.coffee` **will be skipped**, along with dotfiles
+
+## 0.8.3
+
+* The new `dedupe` command. Run it once (`mm dedupe` with optional `--config` parameter as usual)
+to remove the duplicate migration records introduced by 0.8.0.
+It's important to do to ensure the migrtions collection is in valid state which is required to run the migrations down.
+
+## 0.8.2
+
+* Added a new machine-friendly `code` to the result in case of skipped migrations
+* fix the regression when the migrations would be recorded multiple times
+
+## 0.8.1
+
+* update README
+
+## 0.8.0
+
+* _fix regression_: allow configs with `url` option
+* **[breaking change]** Skipped migrations are now also recorded in the DB as being ran (and removed on rollback, see below).
+* **[_potentially_ breaking change]** Fix the erroneous `rollback` behaviour where it was creating another record for the migration
+instead of deleting the old one.
+
+## 0.7.0
+
+* Validate config object when creating the migrator instance
+* **[_potentially_ breaking change]** Added default value for `collection` param: `_migrations`.
+* Added support for the arbitrary connection options (passed down to `MongoClient`). Direct usage of `poolSize` is deprecated (to be removed in 1.0)
+* **[_potentially_ breaking change]** Added `'use strict';` to the generated JS migration stub (@alyyousuf7).
+
+## 0.6.2
+
+* Added support for `timeout` options (kudos @alyyousuf7)
 * Code refactoring
 * Fixed tests for true-ish values
 

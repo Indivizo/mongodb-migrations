@@ -18,6 +18,22 @@ describe 'Migrator', ->
     db.should.be.ok()
     done()
 
+  it 'should set default migrations collection', (done) ->
+    config1 =
+      host: 'localhost'
+      port: 27017
+      db: '_mm'
+    m1 = new mm.Migrator config1, null
+    m1._collName.should.be.equal('_migrations')
+    config2 =
+      host: 'localhost'
+      port: 27017
+      db: '_mm'
+      collection: '_custom'
+    m2 = new mm.Migrator config2, null
+    m2._collName.should.be.equal('_custom')
+    done()
+
   it 'should run migrations and return result', (done) ->
     migrator.add
       id: '1'
@@ -32,6 +48,16 @@ describe 'Migrator', ->
         return done(err) if err
         count.should.be.equal 1
         done()
+
+  it 'should timeout migration and return error', (done) ->
+    migrator.add
+      id: '1'
+      up: (cb) ->
+        setTimeout cb, 300
+    migrator.migrate (err) ->
+      return done(new Error 'migration should have failed') if not err
+      err.message.should.be.equal 'migration timed-out'
+      done()
 
   it 'should allow rollback', (done) ->
     migrator.add

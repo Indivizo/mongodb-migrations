@@ -73,17 +73,18 @@ from the current directory (include it as your project's dependency).
 
 The configuration object can have the following keys:
 
-* `host` — MongoDB host (_optional_ when using _replicaset_),
-* `port` — MongoDB port (_optional_ when using _replicaset_),
+* `url` — full MongoDB connection url (_optional_, when used the rest of the connection params (`host`, `port`, `db`, `user`, `password`, `replicaset`) are ignored),
+* `host` — MongoDB host (_optional_ when using `url` or `replicaset`, **required** otherwise),
+* `port` _[optional]_ — MongoDB port,
 * `db` — MongoDB database name,
 * `ssl` _[optional]_ - boolean, if `true`, `'?ssl=true'` is added to the MongoDB URL,
 * `user` _[optional]_ — MongoDB user name when authentication is required,
 * `password` _[optional]_ — MongoDB password when authentication is required,
-* `collection` — The name of the MongoDB collection to track
-already ran migrations,
-* `directory` — the directory (path relative to the current folder)
-to store migration files in and read them from,
-* `poolSize` - the size of the mongo connection pool,
+* `collection` _[optional]_ — The name of the MongoDB collection to track already ran migrations, **defaults to `_migrations`**,
+* `directory` — the directory (path relative to the current folder) to store migration files in and read them from, used when running from the command-line or when using `runFromDir`,
+* `timeout` _[optional]_ — time in milliseconds after which migration should fail if `done()` is not called (use 0 to disable timeout)
+* `poolSize` _[optional, **deprecated, use `options.server.poolSize` instead**]_ - the size of the mongo connection pool,
+* `options` _[optional]_ - arbitrary options passed to the MongoClient (_Note: if not set directly, `options.server.poolSize` defaults to `5`._),
 * `replicaset` _[optional]_ - if using replica sets should be an object of the following structure:
 ```
 name: 'rs-ds023680',
@@ -177,13 +178,17 @@ or
 mm migrate
 ```
 
-The library only runs migrations that:
+The utility only runs migrations that:
 
 1. have `up` function defined,
 1. were not ran before against this database.
 
-Successfully ran migrations are recorded in the `collection`
+Ran migrations are recorded in the `collection`
 specified in [Configuration](#configuration).
+
+**NOTE:** If there are some noop migrations (those without the `up` method)
+they will be recorded in the `collection`, too.
+See [`migrator.migrate`](#migratormigrate) for the explanation why.
 
 The migration process is stopped instantly if some migration fails
 (returns error in its callback).
@@ -200,7 +205,7 @@ must be importable from the current directory.
 DEBUG=true mm
 ```
 
-Running with a `DEBUG=true` will print out the error stack on the console.
+Running with `DEBUG=true` will print out the error stack on the console.
 
 ## Programmatic usage
 
@@ -294,7 +299,7 @@ function doneFn(error, results),
 where `error` is `null` if everything is OK, or is an error
 returned by the failed migration (if any).
 
-The `results` object is always passed (even in case of error).
+The `results` object is always passed (even in case of an error).
 
 Its keys are `id`s of the added migrations
 (till the one that failed, if any, or till the last one).
@@ -306,8 +311,8 @@ The values are `result` objects having the following properties:
 `"no migration function for direction up"`,
 `"no migration function for direction down"`,
 `"migration already ran"`,
-`"migration wasn't in the recent migrate run"`.
-See [Rollback](#migratorrollback) for the explanation of the last case.
+`"migration wasn't in the recent migrate run"`, See [Rollback](#migratorrollback) for the explanation of the last case,
+* `code` — a more machine-friendly version of `reason`, can be `"no_up"`, `"no_down"`, `"already_ran"`, `"not_in_recent_migrate"`.
 
 The optional `progressFn` function is called once per each migration
 and has the signature
@@ -317,6 +322,21 @@ function progressFn(id, result),
 ```
 
 where `id` is migration's ID, and `result` object is explained above.
+
+Successfully ran migrations are recorded in the `collection`
+specified in [Configuration](#configuration).
+
+**NOTE:** for consistency and for the proper rollback operation migrations that
+do not define the `up` methods (and thus are skipped) are still recorded in
+the DB as being ran which is formally true as they are essentially noop.
+
+This means that if one of your migrations has an issue, you roll back,
+then fix this issue and rerun the migrations,
+the entire set will be re-applied (as rollback assumes the DB is restored to the
+pre-`migrate` state).
+
+Obviously, this will lead to unexpected results if you don't properly define the
+`down` methods where they are required.
 
 ### `migrator.runFromDir`
 
@@ -332,6 +352,7 @@ The files must conform to the following rules:
 1. be CommonJS modules and export `id`, `up` _[optional]_,
 and `down` _[optional]_ — see [Creating Migrations](#creating-migrations)
 for explanation,
+1. have filenames ending in `.js` or `.coffee`;
 1. if the migration file has `.coffee` extension, the
 `coffee-script >= 1.7.0` package must be importable
 from the current directory.
@@ -361,9 +382,12 @@ migrator.rollback()
 This runs all the migrations added to the `migrator`
 in the reverse order, and follows these rules:
 
-1. migrations now having `down` method are skipped,
+1. migrations without the `down` method are skipped (but see the note below),
 1. migrations not ran recently (potentially those
 after the failed one) are skipped.
+
+**NOTE:** Rolling back removes the migration records from the DB.
+It's true even for the migrations that _do not_ have the `down` part.
 
 ### `migrator.create`
 
